@@ -31,12 +31,13 @@ function saveToStorage() {
 /* Show initial placeholder */
 productsContainer.innerHTML = `
   <div class="placeholder-message">
-    Select a category to view products
+    Select a category or search for products
   </div>
 `;
 
 /* Load product data from JSON file */
 async function loadProducts() {
+  if (allProducts.length > 0) return allProducts;
   const response = await fetch("products.json");
   const data = await response.json();
   allProducts = data.products;
@@ -86,6 +87,33 @@ function displayProducts(products) {
   });
 }
 
+/* Filter products based on search and category */
+async function filterProducts() {
+  const products = await loadProducts();
+  const searchTerm = document.getElementById("searchInput").value.toLowerCase();
+  const category = categoryFilter.value;
+
+  let filtered = products;
+
+  if (category) {
+    filtered = filtered.filter(p => p.category === category);
+  }
+
+  if (searchTerm) {
+    filtered = filtered.filter(p =>
+      p.name.toLowerCase().includes(searchTerm) ||
+      p.brand.toLowerCase().includes(searchTerm)
+    );
+  }
+
+  if (!category && !searchTerm) {
+    productsContainer.innerHTML = '<div class="placeholder-message">Select a category or search for products</div>';
+    return;
+  }
+
+  displayProducts(filtered);
+}
+
 /* Toggle product selection */
 function toggleProduct(productId, products) {
   const product = products.find(p => p.id === productId);
@@ -100,7 +128,6 @@ function toggleProduct(productId, products) {
   saveToStorage();
   updateSelectedProductsList();
 
-  /* Update visual state */
   const card = document.querySelector(`[data-id="${productId}"]`);
   if (card) card.classList.toggle("selected");
 }
@@ -119,160 +146,8 @@ function updateSelectedProductsList() {
     </div>
   `).join("");
 
-  /* Add remove button handlers */
-  document.querySelectorAll(".remove-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const productId = parseInt(btn.dataset.id);
-      selectedProducts = selectedProducts.filter(p => p.id !== productId);
-      saveToStorage();
-      updateSelectedProductsList();
-
-      /* Update visual state in grid */
-      const card = document.querySelector(`[data-id="${productId}"]`);
-      if (card) card.classList.remove("selected");
-    });
-  });
-
-  /* Add clear all button */
   selectedProductsList.innerHTML += `
     <button class="clear-all-btn" id="clearAll">Clear All</button>
   `;
 
-  document.getElementById("clearAll").addEventListener("click", () => {
-    selectedProducts = [];
-    saveToStorage();
-    updateSelectedProductsList();
-    document.querySelectorAll(".product-card").forEach(card => card.classList.remove("selected"));
-  });
-}
-
-/* Filter and display products when category changes */
-categoryFilter.addEventListener("change", async (e) => {
-  const products = await loadProducts();
-  const selectedCategory = e.target.value;
-  const filteredProducts = products.filter(
-    (product) => product.category === selectedCategory
-  );
-  displayProducts(filteredProducts);
-});
-
-/* Add message to chat window */
-function addMessage(role, text) {
-  const id = "msg-" + Date.now();
-  const div = document.createElement("div");
-  div.className = `msg ${role}`;
-  div.id = id;
-
-  if (role === "user") {
-    div.innerHTML = `<span class="msg-label">You</span><p>${text}</p>`;
-  } else {
-    div.innerHTML = `<span class="msg-label">L'Oréal Advisor</span><p>${text}</p>`;
-  }
-
-  chatWindow.appendChild(div);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-  return id;
-}
-
-/* Generate routine button */
-generateBtn.addEventListener("click", async () => {
-  if (selectedProducts.length === 0) {
-    alert("Please select at least one product first!");
-    return;
-  }
-
-  const productList = selectedProducts.map(p =>
-    `${p.name} by ${p.brand} (${p.category}): ${p.description}`
-  ).join("\n\n");
-
-  const systemPrompt = `You are a knowledgeable L'Oréal beauty advisor. 
-  Only answer questions related to beauty, skincare, haircare, makeup, and L'Oréal products.
-  When generating routines, be specific about the order of application and why each product is used.
-  Be warm, encouraging, and professional. Use emojis occasionally.`;
-
-  const userMessage = `Please create a personalized beauty routine using these products I selected:\n\n${productList}\n\nGive me step-by-step instructions on how to use these products together effectively.`;
-
-  conversationHistory = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userMessage }
-  ];
-
-  const loadingId = addMessage("ai", "✨ Creating your personalized routine...");
-
-  try {
-    const response = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: conversationHistory })
-    });
-
-    const data = await response.json();
-    const loadingEl = document.getElementById(loadingId);
-    if (loadingEl) loadingEl.remove();
-
-    if (data.choices && data.choices[0]) {
-      const aiReply = data.choices[0].message.content;
-      addMessage("ai", aiReply);
-      conversationHistory.push({ role: "assistant", content: aiReply });
-    } else {
-      addMessage("ai", "Sorry something went wrong. Error: " + JSON.stringify(data));
-    }
-  } catch (error) {
-    const loadingEl = document.getElementById(loadingId);
-    if (loadingEl) loadingEl.remove();
-    addMessage("ai", "Sorry something went wrong. Please try again!");
-    console.error("Error:", error);
-  }
-});
-
-/* Follow-up chat */
-chatForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-
-  const message = document.getElementById("userInput").value.trim();
-  if (!message) return;
-
-  addMessage("user", message);
-  document.getElementById("userInput").value = "";
-
-  if (conversationHistory.length === 0) {
-    conversationHistory = [
-      {
-        role: "system",
-        content: `You are a knowledgeable L'Oréal beauty advisor. Only answer questions related to beauty, skincare, haircare, makeup, and L'Oréal products. Be warm, encouraging, and professional.`
-      }
-    ];
-  }
-
-  conversationHistory.push({ role: "user", content: message });
-
-  const loadingId = addMessage("ai", "✨ Thinking...");
-
-  try {
-    const response = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: conversationHistory })
-    });
-
-    const data = await response.json();
-    const loadingEl = document.getElementById(loadingId);
-    if (loadingEl) loadingEl.remove();
-
-    if (data.choices && data.choices[0]) {
-      const aiReply = data.choices[0].message.content;
-      addMessage("ai", aiReply);
-      conversationHistory.push({ role: "assistant", content: aiReply });
-    } else {
-      addMessage("ai", "Sorry something went wrong. Please try again!");
-    }
-  } catch (error) {
-    const loadingEl = document.getElementById(loadingId);
-    if (loadingEl) loadingEl.remove();
-    addMessage("ai", "Sorry something went wrong. Please try again!");
-    console.error("Error:", error);
-  }
-});
-
-/* Load saved selections on page load */
-loadFromStorage();
+  document.querySelectorAll(".remove-btn").forEach(btn => {
